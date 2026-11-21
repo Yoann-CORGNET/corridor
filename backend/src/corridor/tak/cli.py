@@ -4,6 +4,7 @@ corridor-tak listen              print every CoT routed to us
 corridor-tak listen --capture d  also save each event as raw XML in d/
 corridor-tak demo                publish a test jam zone and drone corridor
 corridor-tak smoke               demo + listener on two connections, exit 0 if routed
+corridor-tak route-smoke         route addressed to one of two listeners, exit 0 if only it gets it
 """
 
 from __future__ import annotations
@@ -15,6 +16,10 @@ import uuid
 from pathlib import Path
 from xml.etree.ElementTree import Element
 
+from corridor.domain.events import RoutePoint
+from corridor.domain.scenario import load_scenario
+from corridor.export.atak import route_cot, route_uid
+from corridor.export.route import flight_route
 from corridor.tak.client import ANNOUNCE_EVERY_S, Identity, TakClient
 from corridor.tak.cot import argb, encode, marker, shape, summary
 
@@ -146,6 +151,54 @@ async def smoke(args: argparse.Namespace) -> int:
     return 0
 
 
+async def route_smoke(args: argparse.Namespace) -> int:
+    """Pivot test 1: a route carrying ``<marti><dest>`` reaches that callsign only."""
+    nonce = uuid.uuid4().hex[:6]
+    pilot = TakClient(args.host, args.port, _identity(args, f"SMOKE-PILOT-{nonce}"))
+    other = TakClient(args.host, args.port, _identity(args, f"SMOKE-OTHER-{nonce}"))
+    tx = TakClient(args.host, args.port, _identity(args, f"SMOKE-TX-{nonce}"))
+    for client in (pilot, other):
+        await client.connect()
+    await asyncio.sleep(2)  # let OTS register both receivers
+    await tx.connect()
+
+    scenario = load_scenario(args.scenario)
+    mission = scenario.missions[0].model_copy(
+        update={"id": f"SMOKE-{nonce}", "pilot_callsign": pilot.me.callsign}
+    )
+    ends = (mission.launch, mission.target)
+    points = [
+        RoutePoint(lat=p.lat, lon=p.lon, t=60.0 * i, action="fly") for i, p in enumerate(ends)
+    ]
+    route = flight_route(scenario, mission, points)
+    uid = route_uid(route)
+    await tx.send(route_cot(route, time.time()))
+
+    async def wait_for(client: TakClient) -> bool:
+        async for ev in client.events():
+            if ev.get("uid") == uid:
+                return True
+        return False
+
+    async def got(client: TakClient) -> bool:
+        try:
+            return await asyncio.wait_for(wait_for(client), args.timeout)
+        except TimeoutError:
+            return False
+
+    try:
+        to_pilot, to_other = await asyncio.gather(got(pilot), got(other))
+    finally:
+        for client in (tx, pilot, other):
+            await client.close()
+    print(f"addressed recipient got it: {to_pilot}; other client got it: {to_other}")
+    if to_pilot and not to_other:
+        print("OK: OTS delivers the route to the addressed callsign only")
+        return 0
+    print("FAIL: " + ("not delivered" if not to_pilot else "also delivered to another client"))
+    return 1
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="corridor-tak")
     parser.add_argument("--host", default="127.0.0.1")
@@ -159,6 +212,9 @@ def main() -> None:
     sub.add_parser("demo")
     p_smoke = sub.add_parser("smoke")
     p_smoke.add_argument("--timeout", type=float, default=10.0)
+    p_route = sub.add_parser("route-smoke")
+    p_route.add_argument("--timeout", type=float, default=10.0)
+    p_route.add_argument("--scenario", type=Path, default=Path("scenarios/demo.json"))
     args = parser.parse_args()
 
     try:
@@ -166,6 +222,8 @@ def main() -> None:
             asyncio.run(listen(args))
         elif args.command == "demo":
             asyncio.run(demo(args))
+        elif args.command == "route-smoke":
+            raise SystemExit(asyncio.run(route_smoke(args)))
         else:
             raise SystemExit(asyncio.run(smoke(args)))
     except KeyboardInterrupt:

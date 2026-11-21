@@ -14,5 +14,8 @@ infra/ots/ots_config.env
 *.pem
 captures/
 
+# corridor-export output
+backend/export/
+
 # resources prototype output
 resources/spectrum_sync/out/

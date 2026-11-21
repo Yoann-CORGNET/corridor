@@ -302,6 +302,10 @@ class Engine:
 
         return done
 
+    def notify(self, to: str, text: str) -> None:
+        """Feed message from an adapter (e.g. the route was sent to the pilot's ATAK)."""
+        self._publish([Notification(to=to, text=text)])
+
     def _publish(self, events: list[Event]) -> None:
         for event in events:
             for subscriber in self._subscribers:

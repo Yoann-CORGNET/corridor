@@ -46,7 +46,10 @@ Status:
 - Flight: simulated drone (`drone.state`), launch only on a flyable plan, safety rule (late
   drone or cancelled cut -> fallback route from the drone position), timed jammer restarts
   (`jammer.restarted`), `inject.delay` demo twist.
-- TAK side: OTS stack, CoT client and demo shapes (sections below). Not wired to the engine yet.
+- TAK side: OTS stack, CoT client and demo shapes (sections below). Not wired to the engine yet,
+  except the route export.
+- Route export: the current plan as an ATAK route sent to the pilot only, an INAV mission and an
+  ArduPilot mission (section below).
 - Front end: first draft in `frontend/` (map, cuts, notifications, timeline, live drone).
 
 ## Front end
@@ -123,6 +126,54 @@ uv run corridor-schema > ../schema/ws.schema.json   # after changing a message m
 - State lives in memory: restart the server to reset the scenario.
 - `--host 0.0.0.0` exposes the server on the LAN (another laptop, a phone browser).
 - A test fails when `schema/ws.schema.json` is out of date: regenerate it with `corridor-schema`.
+- `--tak-host <ip>` (and `--tak-port`, default 8088): OpenTAKServer the route export sends to.
+
+## Route export
+
+One flight route (waypoints with altitude and time constraints, `corridor.export.route`), several
+destinations. Only a flyable plan is exported: a `preview` plan relies on cuts nobody confirmed.
+
+| Destination | What | Time constraints |
+|---|---|---|
+| ATAK | native route (`b-m-r`), addressed to the pilot's callsign only, plus the briefing as a GeoChat DM | in the waypoint names: `T/O 14:12:35Z-14:14:00Z`, `WP3 100m HOLD til 14:20:10Z`, `TGT 100m 14:21:37Z` |
+| INAV | MW XML `.mission` (INAV Configurator, mwp, ezgui) | none in the firmware: take off on time; a hold is a fixed `POSHOLD_TIME` |
+| ArduPilot | QGC WPL 110 `.waypoints` (Mission Planner, QGroundControl) | `NAV_DELAY` until a UTC time: take-off and every hold departure are "not before" times |
+
+- Need to know: the pilot gets the route and its times, never a zone or a jammer.
+- Take-off window: when the route crosses a friendly jammer during a cut, a late take-off is as
+  unsafe as an early one. The latest take-off comes from the flight safety rule (cut margins kept).
+- Altitude: the planner is 2D. Every waypoint gets the export altitude (default 100 m above
+  launch). `Waypoint.alt_m` is per waypoint for a later 3D planner.
+- Both firmwares navigate on GNSS: no use if friendly jamming covers GNSS bands.
+- ArduPilot's `NAV_DELAY` needs GPS time and is reported to overrun by up to about a minute: test
+  on the target vehicle.
+
+From the running server (front: "Export route" card, for the selected mission; Vite proxies
+`/api`). `mission_id` is required:
+
+```bash
+curl -OJ "http://127.0.0.1:8000/api/export/inav?mission_id=M1&altitude_m=80"   # M1.mission
+curl -OJ "http://127.0.0.1:8000/api/export/ardupilot?mission_id=M1"             # M1.waypoints
+curl "http://127.0.0.1:8000/api/export/briefing?mission_id=M1"
+curl -X POST "http://127.0.0.1:8000/api/export/atak?mission_id=M1"               # needs --tak-host
+```
+
+Offline, without the server (cuts given with `--cut` count as confirmed), files in `export/`:
+
+```bash
+uv run corridor-export --cut J3:900:1380
+uv run corridor-export --cut J3:900:1380 --altitude 80 --send 192.168.1.20   # also to ATAK
+uv run corridor-export --revoke 192.168.1.20                                  # delete it on ATAK
+uv run corridor-export --mission M2 --cut J4:900:1380                         # another mission
+```
+
+Before the demo, on the real OTS and phone:
+
+1. `uv run corridor-tak route-smoke`: a route addressed to one of two clients must reach only it
+   (OTS `<marti><dest>` routing, read in the OTS source, never run on 1.8.3).
+2. Draw a route in ATAK, capture it (`corridor-tak listen --capture captures/`) and align
+   `corridor.export.atak.route_cot` on it, as for shapes.
+3. Open `M1.mission` in INAV Configurator (Mission Control tab, Load mission file) to show it.
 
 ## Requirements
 
@@ -171,6 +222,7 @@ uv run corridor-tak smoke     # two connections through OTS, exit 0 if demo shap
 uv run corridor-tak demo      # publish a test jam zone + corridor, refreshed every 30 s
 uv run corridor-tak listen    # print every CoT routed to us
 uv run corridor-tak listen --capture captures/   # also save raw XML
+uv run corridor-tak route-smoke   # route addressed to one of two clients: exit 0 if only it gets it
 ```
 
 Options: `--host` (default 127.0.0.1), `--port` (8088), `--lat` / `--lon` (demo position).
