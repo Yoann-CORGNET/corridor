@@ -184,6 +184,12 @@ export interface RequestPoints {
   picking: boolean
 }
 
+export interface ThreatDraftPoints {
+  pos: Position | null
+  kind: 'radar' | 'jammer' | 'avoid'
+  picking: boolean
+}
+
 /** J/S heatmap from `/api/rf/heatmap`: a PNG and its corners (NW, NE, SE, SW as [lon, lat]). */
 export interface RfHeatmap {
   image: string
@@ -194,6 +200,8 @@ export interface MapView {
   setScene(scene: Scene): void
   /** Points of the mission request being filled in. */
   setRequest(points: RequestPoints): void
+  /** Preview marker and picking cursor for a threat draft. */
+  setThreatDraft(draft: ThreatDraftPoints): void
   onClick(handler: (pos: Position) => void): void
   /** Click on the route, launch or target of a mission this viewer may change. */
   onMissionClick(handler: (mission: string) => void): void
@@ -243,6 +251,12 @@ export function createMapView(container: HTMLElement): MapView {
   let friendlyIds = new Set<string>()
   const drones = new Map<string, maplibregl.Marker>()
   const requestMarkers: maplibregl.Marker[] = []
+  const threatDraftMarkers: maplibregl.Marker[] = []
+  let requestPicking = false
+  let threatPicking = false
+  const updateCursor = () => {
+    map.getCanvas().style.cursor = requestPicking || threatPicking ? 'crosshair' : ''
+  }
   let clickHandler: ((pos: Position) => void) | null = null
   let missionClickHandler: ((mission: string) => void) | null = null
   let movableIds = new Set<string>()
@@ -581,7 +595,17 @@ export function createMapView(container: HTMLElement): MapView {
       requestMarkers.splice(0).forEach((m) => m.remove())
       if (launch) requestMarkers.push(point(launch, 'NEW LAUNCH', '#4dabf7', { mission: null, point: 'launch' }))
       if (target) requestMarkers.push(point(target, 'NEW TARGET', '#ffd43b', { mission: null, point: 'target' }))
-      map.getCanvas().style.cursor = picking ? 'crosshair' : ''
+      requestPicking = picking
+      updateCursor()
+    },
+    setThreatDraft({ pos, kind, picking }) {
+      threatDraftMarkers.splice(0).forEach((m) => m.remove())
+      if (pos) {
+        const color = kind === 'radar' ? COLORS.radar : kind === 'jammer' ? COLORS.enemy : COLORS.avoid
+        threatDraftMarkers.push(point(pos, `NEW ${kind.toUpperCase()}`, color))
+      }
+      threatPicking = picking
+      updateCursor()
     },
     onClick(handler) {
       clickHandler = handler

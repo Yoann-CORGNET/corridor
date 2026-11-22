@@ -41,6 +41,30 @@ export interface CutDraft {
   mission: string | null
 }
 
+export type ThreatKind = 'radar' | 'jammer' | 'avoid'
+
+export interface ThreatDraft {
+  open: boolean
+  kind: ThreatKind
+  pos: Position | null
+  radius_m: number
+  eirp_w: number
+  bands: string[]
+  position_error_m: number
+  picking: boolean
+}
+
+export const DEFAULT_THREAT_DRAFT: ThreatDraft = {
+  open: false,
+  kind: 'radar',
+  pos: null,
+  radius_m: 2000,
+  eirp_w: 25,
+  bands: ['2.4GHz'],
+  position_error_m: 0,
+  picking: false,
+}
+
 const LIST: SidePanel = { view: 'list' }
 
 /** What the map (and, for a mission, the timeline) should frame after a click in the sidebar.
@@ -86,6 +110,8 @@ interface State {
   listTab: 'missions' | 'objects'
   /** EW cut form; null = closed. */
   cutDraft: CutDraft | null
+  /** Enemy threat or avoid zone creation draft. */
+  threatDraft: ThreatDraft
   focus: Focus | null
   /** Route choice the pointer is on (card or map), drawn on top while it stays there. */
   focusedChoice: ChoiceKind | null
@@ -117,6 +143,9 @@ interface State {
   setListTab: (tab: 'missions' | 'objects') => void
   openCut: (draft: CutDraft) => void
   closeCut: () => void
+  openThreat: (kind?: ThreatKind, pos?: Position | null) => void
+  closeThreat: () => void
+  setThreatDraft: (patch: Partial<ThreatDraft>) => void
   focusChoice: (kind: ChoiceKind | null) => void
   selectChoice: (kind: ChoiceKind | null) => void
 }
@@ -136,6 +165,7 @@ const SESSION = {
   panel: LIST,
   listTab: 'missions',
   cutDraft: null,
+  threatDraft: DEFAULT_THREAT_DRAFT,
   focus: null,
   focusedChoice: null,
   selectedChoice: null,
@@ -161,16 +191,23 @@ export const useStore = create<State>((set, get) => ({
     set({
       requestDraft: { ...fresh, open: true, picking: 'launch', launch: fresh.launch ?? launch },
       cutDraft: null,
+      threatDraft: DEFAULT_THREAT_DRAFT,
     })
   },
   openEdit: (mission, launch, target) =>
     set({
       requestDraft: { open: true, editing: mission, launch, target, picking: null },
       cutDraft: null,
+      threatDraft: DEFAULT_THREAT_DRAFT,
     }),
   closeRequest: () => set({ requestDraft: NO_DRAFT }),
   setRequestDraft: (patch) => set({ requestDraft: { ...get().requestDraft, ...patch } }),
   pickPoint: (pos) => {
+    const threat = get().threatDraft
+    if (threat.open && threat.picking) {
+      set({ threatDraft: { ...threat, pos, picking: false } })
+      return
+    }
     const draft = get().requestDraft
     if (!draft.picking) return
     const next = draft.picking === 'launch' && draft.editing === null && !draft.target ? 'target' : null
@@ -181,8 +218,16 @@ export const useStore = create<State>((set, get) => ({
   openObject: (kind, id) => set({ panel: { view: 'object', kind, id }, focus: focusOn(kind, id) }),
   openList: () => set({ panel: LIST }),
   setListTab: (listTab) => set({ listTab }),
-  openCut: (cutDraft) => set({ cutDraft, requestDraft: NO_DRAFT }),
+  openCut: (cutDraft) => set({ cutDraft, requestDraft: NO_DRAFT, threatDraft: DEFAULT_THREAT_DRAFT }),
   closeCut: () => set({ cutDraft: null }),
+  openThreat: (kind = 'radar', pos = null) =>
+    set({
+      threatDraft: { ...DEFAULT_THREAT_DRAFT, open: true, kind, pos, picking: pos === null },
+      cutDraft: null,
+      requestDraft: NO_DRAFT,
+    }),
+  closeThreat: () => set({ threatDraft: DEFAULT_THREAT_DRAFT }),
+  setThreatDraft: (patch) => set({ threatDraft: { ...get().threatDraft, ...patch } }),
   focusChoice: (focusedChoice) => set({ focusedChoice }),
   selectChoice: (selectedChoice) => set({ selectedChoice }),
 

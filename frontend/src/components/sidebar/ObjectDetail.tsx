@@ -1,10 +1,11 @@
 // One object in detail: a friendly jammer (its cuts, the missions it concerns) or an enemy threat.
 import { Badge, Button, Stack, Text, UnstyledButton } from '@mantine/core'
+import { send } from '../../api/client'
 import { formatPosition, friendlyZoneState } from '../../domain/view'
 import { useLiveSimTime } from '../../hooks/useSimNow'
 import { useStore } from '../../store'
 import { THREAT_COLOR } from '../colors'
-import { RadioIcon } from '../Icons'
+import { RadioIcon, TrashIcon } from '../Icons'
 import { CutRow, PanelHeader, SectionTitle } from './parts'
 import { threatSummary } from './threat'
 
@@ -77,9 +78,15 @@ function JammerDetail({ id }: { readonly id: string }) {
 
 function ThreatDetail({ id }: { readonly id: string }) {
   const scenario = useStore((s) => s.snapshot?.scenario)
+  const isCommand = useStore((s) => s.snapshot?.viewer.role === 'command')
   const openList = useStore((s) => s.openList)
   const threat = scenario?.enemy_threats.find((t) => t.id === id)
   if (!threat) return <Gone onBack={openList} />
+
+  const remove = () => {
+    send({ type: 'threat.remove', threat: id })
+    openList()
+  }
 
   return (
     <Stack gap="xs">
@@ -90,6 +97,18 @@ function ThreatDetail({ id }: { readonly id: string }) {
       />
       <Text size="xs" c="dimmed">{threatSummary(threat)}</Text>
       <Text size="xs" c="dimmed">{formatPosition(threat.pos)}</Text>
+
+      {isCommand && (
+        <Button
+          size="xs"
+          variant="light"
+          color="red"
+          leftSection={<TrashIcon size={14} />}
+          onClick={remove}
+        >
+          Remove threat
+        </Button>
+      )}
 
       <SectionTitle>Missions it concerns</SectionTitle>
       <ConcernedMissions match={(_, threats) => threats.includes(id)} />

@@ -1,15 +1,14 @@
 // The mission form, over the sidebar panel: a pilot's new mission (action bar), or a change to a
 // mission still on the ground (mission detail). Launch and target are typed or pasted
 // ("lat, lon"), or picked on the map.
-import { ActionIcon, Alert, Button, Group, SegmentedControl, Stack, Text, TextInput, Tooltip } from '@mantine/core'
+import { Alert, Button, Group, SegmentedControl, Stack, Text, TextInput } from '@mantine/core'
 import { useState } from 'react'
 import { send } from '../../api/client'
 import type { Mission, Position } from '../../api/protocol'
-import { clockLabel, distanceM, formatPosition, missionOf, nextClockTime, parsePosition } from '../../domain/view'
+import { clockLabel, distanceM, missionOf, nextClockTime } from '../../domain/view'
 import { useLiveSimTime } from '../../hooks/useSimNow'
 import { useStore } from '../../store'
-import { CrosshairIcon } from '../Icons'
-import { PanelHeader } from './parts'
+import { PanelHeader, PointField } from './parts'
 
 type When = 'keep' | 'asap' | '5' | '15' | 'at'
 
@@ -118,52 +117,6 @@ function departure(when: When, at: string, startTime: string, now: number): numb
   if (when === 'at') return nextClockTime(startTime, now, at)
   const delay = when === '5' || when === '15' ? Number(when) * 60 : 0
   return Math.round(now + delay)
-}
-
-interface PointFieldProps {
-  readonly label: string
-  readonly hint?: string
-  readonly value: Position | null
-  /** The next map click sets this point. */
-  readonly picking: boolean
-  readonly onChange: (p: Position | null) => void
-  readonly onPick: () => void
-}
-
-/** "lat, lon" text field kept in sync with the draft: typed, pasted or picked on the map. */
-function PointField({ label, hint, value, picking, onChange, onPick }: PointFieldProps) {
-  const [text, setText] = useState(value ? formatPosition(value) : '')
-  const [shown, setShown] = useState(value)
-  // Picked on the map (or reset): show the new point. Typing keeps the text as typed.
-  if (value !== shown) {
-    setShown(value)
-    const typed = parsePosition(text)
-    if (!(typed && value && typed.lat === value.lat && typed.lon === value.lon)) {
-      setText(value ? formatPosition(value) : '')
-    }
-  }
-  const invalid = text.trim() !== '' && parsePosition(text) === null
-
-  return (
-    <TextInput
-      label={label}
-      description={picking ? 'Click on the map…' : hint}
-      placeholder="48.14500, 11.51300"
-      value={text}
-      onChange={(e) => {
-        setText(e.currentTarget.value)
-        onChange(parsePosition(e.currentTarget.value))
-      }}
-      error={invalid ? 'Type "lat, lon" in decimal degrees' : undefined}
-      rightSection={
-        <Tooltip label={picking ? 'Stop picking' : 'Pick on the map'} openDelay={300}>
-          <ActionIcon variant={picking ? 'filled' : 'light'} aria-label={`Pick ${label.toLowerCase()} on the map`} onClick={onPick}>
-            <CrosshairIcon size={14} />
-          </ActionIcon>
-        </Tooltip>
-      }
-    />
-  )
 }
 
 interface ReachProps {

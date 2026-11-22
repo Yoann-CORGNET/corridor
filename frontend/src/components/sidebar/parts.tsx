@@ -1,10 +1,11 @@
 // Pieces shared by the sidebar panels.
-import { Badge, Button, CloseButton, Group, Text } from '@mantine/core'
-import type { ReactNode } from 'react'
+import { ActionIcon, Badge, Button, CloseButton, Group, Text, TextInput, Tooltip } from '@mantine/core'
+import { useState, type ReactNode } from 'react'
 import { send } from '../../api/client'
-import type { Cut } from '../../api/protocol'
-import { clockLabel } from '../../domain/view'
+import type { Cut, Position } from '../../api/protocol'
+import { clockLabel, formatPosition, parsePosition } from '../../domain/view'
 import { useStore } from '../../store'
+import { CrosshairIcon } from '../Icons'
 
 interface PanelHeaderProps {
   readonly title: ReactNode
@@ -79,5 +80,67 @@ export function CutRow({ cut, showJammer }: { readonly cut: Cut; readonly showJa
         </Button>
       </Group>
     </Group>
+  )
+}
+
+export interface PointFieldProps {
+  readonly label: string
+  readonly hint?: string
+  readonly pickingHint?: string
+  readonly value: Position | null
+  /** The next map click sets this point. */
+  readonly picking: boolean
+  readonly color?: string
+  readonly onChange: (p: Position | null) => void
+  readonly onPick: () => void
+}
+
+/** "lat, lon" text field kept in sync with the draft: typed, pasted or picked on the map. */
+export function PointField({
+  label,
+  hint,
+  pickingHint = 'Click on the map…',
+  value,
+  picking,
+  color,
+  onChange,
+  onPick,
+}: PointFieldProps) {
+  const [text, setText] = useState(value ? formatPosition(value) : '')
+  const [shown, setShown] = useState(value)
+  // Picked on the map (or reset): show the new point. Typing keeps the text as typed.
+  if (value !== shown) {
+    setShown(value)
+    const typed = parsePosition(text)
+    if (!(typed && value && typed.lat === value.lat && typed.lon === value.lon)) {
+      setText(value ? formatPosition(value) : '')
+    }
+  }
+  const invalid = text.trim() !== '' && parsePosition(text) === null
+
+  return (
+    <TextInput
+      label={label}
+      description={picking ? pickingHint : hint}
+      placeholder="48.14500, 11.51300"
+      value={text}
+      onChange={(e) => {
+        setText(e.currentTarget.value)
+        onChange(parsePosition(e.currentTarget.value))
+      }}
+      error={invalid ? 'Type "lat, lon" in decimal degrees' : undefined}
+      rightSection={
+        <Tooltip label={picking ? 'Stop picking' : 'Pick on the map'} openDelay={300}>
+          <ActionIcon
+            variant={picking ? 'filled' : 'light'}
+            color={color ?? (picking ? 'blue' : undefined)}
+            aria-label={`Pick ${label.toLowerCase()} on the map`}
+            onClick={onPick}
+          >
+            <CrosshairIcon size={14} />
+          </ActionIcon>
+        </Tooltip>
+      }
+    />
   )
 }

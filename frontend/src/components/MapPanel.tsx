@@ -73,6 +73,7 @@ export function MapPanel() {
   const [legendOpen, setLegendOpen] = useState(false)
   const [probe, setProbe] = useState<ProbeData | null>(null)
   const draft = useStore((s) => s.requestDraft)
+  const threatDraft = useStore((s) => s.threatDraft)
 
   useEffect(() => {
     if (!container.current) return
@@ -254,6 +255,14 @@ export function MapPanel() {
     view.current?.setRequest({ launch: draft.launch, target: draft.target, picking: draft.picking !== null })
   }, [draft])
 
+  useEffect(() => {
+    view.current?.setThreatDraft({
+      pos: threatDraft.pos,
+      kind: threatDraft.kind,
+      picking: threatDraft.open && threatDraft.picking,
+    })
+  }, [threatDraft.pos, threatDraft.kind, threatDraft.open, threatDraft.picking])
+
   // A click in the sidebar frames the mission or object. Read once per click: later snapshots
   // or plans must not move the map.
   const focus = useStore((s) => s.focus)
@@ -267,13 +276,16 @@ export function MapPanel() {
 
   // Escape stops picking a point, leaving the form unchanged.
   useEffect(() => {
-    if (!draft.picking) return
+    if (!draft.picking && !threatDraft.picking) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') useStore.getState().setRequestDraft({ picking: null })
+      if (e.key === 'Escape') {
+        if (draft.picking) useStore.getState().setRequestDraft({ picking: null })
+        if (threatDraft.picking) useStore.getState().setThreatDraft({ picking: false })
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [draft.picking])
+  }, [draft.picking, threatDraft.picking])
 
   return (
     <div className="map-wrap">
@@ -286,6 +298,12 @@ export function MapPanel() {
       {draft.picking && (
         <div className="map-pick-banner">
           Click on the map to set the {draft.picking === 'launch' ? 'launch point' : 'target'} · Esc to cancel
+        </div>
+      )}
+
+      {threatDraft.open && threatDraft.picking && (
+        <div className="map-pick-banner">
+          Click on the map to place the {threatDraft.kind === 'avoid' ? 'zone to avoid' : threatDraft.kind} · Esc to cancel
         </div>
       )}
 
