@@ -9,6 +9,7 @@ from corridor.domain.commands import (
     InjectDelay,
     LaunchMission,
     RequestMission,
+    RestartJammer,
     ScheduleCut,
     SetClock,
 )
@@ -24,7 +25,14 @@ from corridor.domain.events import (
 from corridor.domain.geo import Grid, LocalFrame, Position
 from corridor.domain.planner.plan import plan_fallback, plan_mission
 from corridor.domain.safety import Flight, position_at, schedule_violation
-from corridor.domain.scenario import Mission, Scenario
+from corridor.domain.scenario import (
+    Mission,
+    Scenario,
+    ScriptedEvent,
+    ScriptedHold,
+    ScriptedRestart,
+    ScriptedThreat,
+)
 from corridor.domain.state import Cut
 from corridor.domain.zones import mission_constraints, mission_shapes
 from corridor.engine.clock import SimClock
@@ -375,3 +383,85 @@ def test_plans_carry_their_reasons(scenario: Scenario) -> None:
     assert j3.effect == "crossed_in_cut"
     sent = [p for p in world.of(PlanUpdated) if p.reasons]
     assert sent  # on the wire too
+
+
+# --- scripted timeline, jammer back on ---------------------------------------------------------
+
+
+def script(world: World, *events: ScriptedEvent) -> None:
+    world.engine.scenario = world.engine.scenario.model_copy(update={"events": list(events)})
+
+
+def crossing(world: World) -> tuple[float, float]:
+    """When the approved route is inside J3's zone."""
+    plan = world.m1.plan
+    assert plan is not None and plan.status == "approved"
+    j3 = next(r for r in plan.reasons if r.threat == "J3")
+    assert j3.enter_s is not None and j3.exit_s is not None
+    return j3.enter_s, j3.exit_s
+
+
+def test_jammer_back_on_while_the_drone_crosses_reroutes_it_out(scenario: Scenario) -> None:
+    world = World(scenario)
+    world.cut()
+    enter, _ = crossing(world)
+    back_on = enter + 40
+    script(world, ScriptedRestart(at_s=back_on, jammer="J3"))
+    world.engine.submit(LaunchMission(actor=PILOT, mission="M1"))
+    world.run_to(back_on + 5)
+    assert not world.engine.state.cuts  # the cut ended early
+    texts = [n.text for n in world.of(Notification) if n.to == PILOT]
+    assert any(t.startswith("J3 back on at") for t in texts)
+    assert any(n.to == COMMAND and n.text.startswith("J3 back on") for n in world.of(Notification))
+    fallback = next(p for p in world.of(PlanUpdated) if p.status == "fallback")
+    route = fallback.optimised_route
+    frame = LocalFrame(world.m1.mission.launch)
+    j3 = next(z for z in world.m1.shapes if z.threat == "J3")
+    # Caught inside: straight out by the nearest way, then the safe route.
+    assert j3.contains(*frame.to_xy(Position(lat=route[0].lat, lon=route[0].lon)))
+    assert not j3.contains(*frame.to_xy(Position(lat=route[1].lat, lon=route[1].lon)))
+    # Getting out is not a new violation: one fallback, then the drone reaches the target.
+    world.run_to(route[1].t + 60)
+    assert len([p for p in world.of(PlanUpdated) if p.status == "fallback"]) == 1
+    world.run_to(4000)
+    assert world.engine.state.missions["M1"] == "arrived"
+
+
+def test_scripted_threat_and_hold_fire_once_at_their_time(scenario: Scenario) -> None:
+    world, takeoff = launched(scenario)
+    target = world.m1.mission.target
+    far = Position(lat=target.lat + 0.08, lon=target.lon)
+    script(
+        world,
+        ScriptedThreat(at_s=takeoff + 60, kind="radar", pos=far, radius_m=300),
+        ScriptedHold(at_s=takeoff + 90, mission="M1", delay_s=30),
+    )
+    world.run_to(takeoff + 55)
+    assert not world.of(ThreatAdded)
+    world.run_to(takeoff + 200)
+    (added,) = world.of(ThreatAdded)
+    assert added.threat.id == "R2" and added.threat.pos == far
+    assert world.m1.flight is not None and world.m1.flight.delay_s == 30
+    assert any("held 30 s by scenario" in n.text for n in world.of(Notification))
+
+
+def test_a_scripted_event_that_cannot_apply_is_skipped_and_told(scenario: Scenario) -> None:
+    world = World(scenario)
+    script(world, ScriptedHold(at_s=10, mission="M1", delay_s=30))  # still on the ground
+    world.run_to(20)
+    skipped = [n for n in world.of(Notification) if n.to == COMMAND and "skipped" in n.text]
+    assert len(skipped) == 1 and "no drone in flight" in skipped[0].text
+    world.run_to(40)
+    assert len([n for n in world.of(Notification) if "skipped" in n.text]) == 1
+
+
+def test_only_the_operator_or_the_command_restarts_a_jammer_that_is_cut(scenario: Scenario) -> None:
+    world = World(scenario)
+    world.cut()
+    with pytest.raises(CommandRejected, match="not cut now"):
+        world.engine.submit(RestartJammer(actor=EW, jammer="J3"))  # the cut starts at 900
+    world.run_to(CUT[0] + 10)
+    with pytest.raises(CommandRejected, match="only EW-J3 or the command"):
+        world.engine.submit(RestartJammer(actor=PILOT, jammer="J3"))
+    world.engine.submit(RestartJammer(actor=EW, jammer="J3"))
+    assert not world.engine.state.cuts

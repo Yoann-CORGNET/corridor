@@ -56,6 +56,9 @@ class MissionPlan:
     baseline_route: list[RoutePoint]
     optimised_route: list[RoutePoint]
     choices: list[RouteChoice] = field(default_factory=list)
+    escape_until_s: float | None = None
+    """Fallback only: end of the straight leg out of a zone the drone was caught in. The
+    safety rules ignore the route before it: the drone is getting out."""
 
 
 def plan_mission(
@@ -440,6 +443,7 @@ def plan_fallback(
         metrics=route_metrics(mission, route, route),
         baseline_route=route,
         optimised_route=route,
+        escape_until_s=depart_s if prefix else None,
     )
 
 

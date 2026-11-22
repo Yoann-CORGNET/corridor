@@ -22,7 +22,7 @@ web front end ◄──WebSocket /ws──► backend (Python, one process: Fast
 (planning screen)                   ├─ engine: world state, simulation clock, safety rules
                                     ├─ planner: pure computation, runs off the event loop (to write)
                                     ├─ WebSocket adapter: commands in, events out
-                                    └─ TAK adapter (later) ◄──CoT, TCP 8088──► OpenTAKServer ◄──► ATAK (Android)
+                                    └─ TAK adapter ◄──CoT, TCP 8088──► OpenTAKServer ◄──► ATAK (Android)
 ```
 
 - The engine is the single owner of state: scenario, cuts, mission status, simulation time.
@@ -30,9 +30,8 @@ web front end ◄──WebSocket /ws──► backend (Python, one process: Fast
   views of it.
 - Planner: pure function (no state, no clock), so it can run in a process pool. J/S jamming
   model and planner design in [docs/architecture.md](docs/architecture.md).
-- TAK adapter: will publish zones, routes, drone and notifications as CoT, and turn ATAK chat
-  (`ACK`) into commands. The CoT client (`corridor.tak`) works standalone but is not wired to the
-  engine yet.
+- TAK adapter (`corridor.adapters.tak`, `corridor-server --tak-host`): publishes routes, zones,
+  drones and notifications (GeoChat) as CoT. One way for now: ATAK chat does not become commands.
 - OTS is only the relay to ATAK. The web front end never talks to OTS directly.
 
 Core architecture, module layout and WebSocket protocol: [docs/architecture.md](docs/architecture.md).
@@ -46,7 +45,8 @@ Status:
 - Flight: simulated drone (`drone.state`), launch only on a flyable plan, safety rule (late
   drone or cancelled cut -> fallback route from the drone position), timed jammer restarts
   (`jammer.restarted`), `inject.delay` demo twist.
-- TAK side: OTS stack, CoT client and demo shapes (sections below). Not wired to the engine yet.
+- TAK side: OTS stack, CoT client, and the engine published to ATAK with `--tak-host` (sections
+  below).
 - Front end: first draft in `frontend/` (map, cuts, notifications, timeline, live drone).
 
 ## Front end
@@ -183,6 +183,15 @@ Options: `--host` (default 127.0.0.1), `--port` (8088), `--lat` / `--lon` (demo 
    protocol TCP, no SSL.
 4. From `backend/`, run `uv run corridor-tak demo --lat <lat> --lon <lon>` near where the map is centered: a red
    jam zone, a blue corridor crossing it and an EW-1 marker appear.
+5. Live: `uv run corridor-server --scenario scenarios/hongkong_scripted.json --tak-host 127.0.0.1`.
+   ATAK then shows each mission's zones (friendly red, green while cut), its planned route
+   (colour by status, reasons and times in the remarks), the drone in flight, and receives the
+   notifications as GeoChat. Set the phone's callsign to the pilot's (`PILOT-1`) or the
+   operator's (`EW-HK`) to get them as direct messages; otherwise they go to All Chat Rooms,
+   prefixed with the callsign. Everything is sent again every 15 s, so a phone that joins late
+   catches up. If OTS is down, the server runs anyway and retries every 5 s.
+   The GeoChat and delete messages were written from known ATAK output, like the shapes: check
+   them against a capture (next section) on the demo phone.
 
 ## Shape format: check against a real capture
 

@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { send } from '../../api/client'
 import type { Cut } from '../../api/protocol'
 import { clockLabel } from '../../domain/view'
+import { useLiveSimTime } from '../../hooks/useSimNow'
 import { useStore } from '../../store'
 
 interface PanelHeaderProps {
@@ -41,12 +42,15 @@ export function SectionTitle({ children }: { readonly children: ReactNode }) {
   )
 }
 
-/** One cut, with Confirm (its jammer's operator only) and Cancel. */
+/** One cut, with Confirm (its jammer's operator only), Back on now (while it runs: its
+ * operator or the command) and Cancel. */
 export function CutRow({ cut, showJammer }: { readonly cut: Cut; readonly showJammer: boolean }) {
   const snapshot = useStore((s) => s.snapshot)
   const actor = useStore((s) => s.callsign)
+  const now = useLiveSimTime(2)
   if (!snapshot) return null
-  const { start_time, friendly_jammers } = snapshot.scenario
+  const { start_time, friendly_jammers, command_callsign } = snapshot.scenario
+  const running = cut.start_s <= now && now < cut.end_s
   const operator = friendly_jammers.find((j) => j.id === cut.jammer)?.operator_callsign
   const label = (t: number) => clockLabel(start_time, t)
 
@@ -72,6 +76,16 @@ export function CutRow({ cut, showJammer }: { readonly cut: Cut; readonly showJa
             onClick={() => send({ type: 'cut.confirm', cut: cut.id })}
           >
             Confirm
+          </Button>
+        )}
+        {running && (actor === operator || actor === command_callsign) && (
+          <Button
+            size="compact-xs"
+            color="red"
+            title="The jammer is back on now: drones relying on this cut are rerouted"
+            onClick={() => send({ type: 'jammer.restart', jammer: cut.jammer })}
+          >
+            Back on now
           </Button>
         )}
         <Button size="compact-xs" variant="subtle" color="red" onClick={() => send({ type: 'cut.cancel', cut: cut.id })}>

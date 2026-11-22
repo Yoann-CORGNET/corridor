@@ -1,0 +1,82 @@
+{
+  "start_time": "2026-11-21T14:00:00Z",
+  "js_threshold_db": 0,
+  "reference_link": {
+    "eirp_w": 10,
+    "range_m": 5000
+  },
+  "command_callsign": "CMD",
+  "friendly_jammers": [
+    {
+      "id": "J-HARBOUR",
+      "operator_callsign": "EW-HK",
+      "pos": {
+        "lat": 22.2905,
+        "lon": 114.1925
+      },
+      "eirp_w": 2,
+      "bands": [
+        "2.4GHz"
+      ],
+      "cuts": [
+        {
+          "start_s": 900,
+          "end_s": 1260
+        }
+      ]
+    }
+  ],
+  "enemy_threats": [
+    {
+      "type": "jammer",
+      "id": "E-PEAK",
+      "pos": {
+        "lat": 22.2759,
+        "lon": 114.1455
+      },
+      "eirp_w": 1,
+      "bands": [
+        "2.4GHz"
+      ]
+    }
+  ],
+  "terrain": {
+    "dem": "copernicus_hongkong.tif",
+    "buildings": "buildings_hongkong.geojson",
+    "mode": "3d"
+  },
+  "pilots": [
+    {
+      "callsign": "PILOT-1",
+      "drone": {
+        "id": "UAV-HK",
+        "band": "2.4GHz",
+        "link_eirp_w": 10,
+        "cruise_speed_mps": 15,
+        "battery_max_s": 2400
+      }
+    }
+  ],
+  "missions": [
+    {
+      "id": "M-HK",
+      "pilot_callsign": "PILOT-1",
+      "launch": {
+        "lat": 22.2938,
+        "lon": 114.1712
+      },
+      "target": {
+        "lat": 22.2865,
+        "lon": 114.2135
+      },
+      "departure_s": 600
+    }
+  ],
+  "events": [
+    {
+      "type": "jammer.restart",
+      "at_s": 1000,
+      "jammer": "J-HARBOUR"
+    }
+  ]
+}

@@ -124,6 +124,67 @@ def shape(
     return encode(ev)
 
 
+ALL_CHAT = "All Chat Rooms"
+
+
+def chat(
+    sender_uid: str,
+    sender_callsign: str,
+    text: str,
+    t: float,
+    message_id: str,
+    *,
+    to_uid: str | None = None,
+    to_callsign: str | None = None,
+    lat: float = 0.0,
+    lon: float = 0.0,
+) -> bytes:
+    """GeoChat message (``b-t-f``): direct to ``to_uid`` / ``to_callsign``, or to All Chat
+    Rooms without them.
+
+    Written from known ATAK GeoChat output, not from a schema, like the shapes: check against a
+    capture (``corridor-tak listen --capture``) of a chat sent from the target ATAK version.
+    """
+    direct = to_uid is not None and to_callsign is not None
+    room_id = to_uid if direct else ALL_CHAT
+    room = to_callsign if direct else ALL_CHAT
+    ev = _event(f"GeoChat.{sender_uid}.{room_id}.{message_id}", "b-t-f", "h-g-i-g-o", t, SA_STALE_S)
+    _point(ev, lat, lon)
+    detail = SubElement(ev, "detail")
+    chat_el = SubElement(
+        detail,
+        "__chat",
+        attrib={
+            "parent": "RootContactGroup",
+            "groupOwner": "false",
+            "messageId": message_id,
+            "chatroom": str(room),
+            "id": str(room_id),
+            "senderCallsign": sender_callsign,
+        },
+    )
+    SubElement(chat_el, "chatgrp", uid0=sender_uid, uid1=str(room_id), id=str(room_id))
+    SubElement(detail, "link", uid=sender_uid, type="a-f-G-U-C", relation="p-p")
+    remarks = SubElement(
+        detail, "remarks", source=f"BAO.F.ATAK.{sender_uid}", to=str(room_id), time=cot_time(t)
+    )
+    remarks.text = text
+    if direct:
+        marti = SubElement(detail, "marti")
+        SubElement(marti, "dest", callsign=str(to_callsign))
+    return encode(ev)
+
+
+def delete(uid: str, t: float) -> bytes:
+    """Remove a shape or marker this client published (``t-x-d-d``)."""
+    ev = _event(f"{uid}.delete", "t-x-d-d", "h-g-i-g-o", t, 20.0)
+    _point(ev, 0.0, 0.0)
+    detail = SubElement(ev, "detail")
+    SubElement(detail, "link", uid=uid, relation="none", type="none")
+    SubElement(detail, "__forcedelete")
+    return encode(ev)
+
+
 @dataclass
 class Framer:
     """Splits a TCP byte stream into CoT ``<event>`` elements."""

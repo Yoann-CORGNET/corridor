@@ -188,3 +188,42 @@ def test_shipped_scenarios_give_each_mission_its_own_jammer(name: str) -> None:
     shipped = load_scenario(Path(__file__).resolve().parent.parent / "scenarios" / f"{name}.json")
     constraints = constraints_by_mission(shipped, 100)
     assert {m: c.jammers for m, c in constraints.items()} == {"M1": ["J3"], "M2": ["J4"]}
+
+
+def test_scripted_events_load_and_name_known_things(scenario: Scenario) -> None:
+    data = _data(scenario)
+    data["events"] = [
+        {"type": "jammer.restart", "at_s": 1000, "jammer": "J3"},
+        {
+            "type": "threat.add",
+            "at_s": 1100,
+            "kind": "radar",
+            "pos": {"lat": 48.1, "lon": 11.5},
+            "radius_m": 500,
+        },
+        {"type": "inject.delay", "at_s": 1200, "mission": "M1", "delay_s": 60},
+        {"type": "threat.remove", "at_s": 1300, "threat": "R2"},
+    ]
+    assert [e.type for e in Scenario.model_validate(data).events] == [
+        "jammer.restart",
+        "threat.add",
+        "inject.delay",
+        "threat.remove",
+    ]
+    for bad, match in (
+        ({"type": "jammer.restart", "at_s": 10, "jammer": "J9"}, "unknown friendly jammer J9"),
+        ({"type": "inject.delay", "at_s": 10, "mission": "M9", "delay_s": 5}, "unknown mission"),
+        (
+            {"type": "threat.add", "at_s": 10, "kind": "radar", "pos": {"lat": 48, "lon": 11}},
+            "takes radius_m",
+        ),
+    ):
+        with pytest.raises(ValidationError, match=match):
+            Scenario.model_validate({**data, "events": [bad]})
+
+
+def test_the_scripted_hong_kong_demo_loads() -> None:
+    from corridor.domain.scenario import SCENARIOS_DIR
+
+    scripted = load_scenario(SCENARIOS_DIR / "hongkong_scripted.json")
+    assert [e.type for e in scripted.events] == ["jammer.restart"]

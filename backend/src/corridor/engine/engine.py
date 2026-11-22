@@ -12,7 +12,13 @@ flight, drone, revision. A mission only reacts to the friendly jammers that conc
 Threats: the command adds and removes enemy threats and zones to avoid (``threat.add``,
 ``threat.remove``); the engine keeps ``scenario.enemy_threats`` up to date. Each change
 recomputes the zones and grid of every mission, and every mission still ``planned`` that the
-threat concerns gets a new plan. A drone already in the air keeps its route; its pilot is told.
+threat concerns gets a new plan. A drone in the air whose route now enters the new zone falls
+back to a safe route (safety rule); otherwise it keeps its route. Its pilot is told.
+
+Scripted timeline: ``scenario.events`` fire once each, at the first tick past their ``at_s``,
+as the commands they mirror (``jammer.restart`` by the jammer's operator, ``threat.add`` and
+``threat.remove`` by the command, ``inject.delay`` by the scenario). A rejected one (no drone
+in flight to hold, jammer not cut) is skipped and the command is told.
 
 Plans: while a mission is still ``planned``, every change to the cuts of a jammer that
 concerns it requests a new plan with a new revision of that mission. The plan comes back later,
@@ -43,6 +49,7 @@ from corridor.domain.commands import (
     LaunchMission,
     RemoveThreat,
     RequestMission,
+    RestartJammer,
     ScheduleCut,
     SetClock,
     UpdateMission,
@@ -87,8 +94,13 @@ from corridor.domain.scenario import (
     EnemyThreat,
     Mission,
     Scenario,
+    ScriptedEvent,
+    ScriptedHold,
+    ScriptedRemoval,
+    ScriptedRestart,
+    ScriptedThreat,
 )
-from corridor.domain.state import Cut, WorldState, merge_cuts
+from corridor.domain.state import SCENARIO_ACTOR, Cut, WorldState, merge_cuts
 from corridor.domain.terrain import profile, with_altitude
 from corridor.domain.zones import (
     MissionConstraints,
@@ -280,6 +292,7 @@ class Engine:
         previous, self._last_tick_s = self._last_tick_s, now
         if now <= previous:
             return []
+        scripted = self._scripted(previous, now)
         events = self._cut_events(previous, now)
         for runtime in self.missions.values():
             request = runtime.request
@@ -307,7 +320,42 @@ class Engine:
         self._replan_after(events)
         if stale:
             self.request_plans(stale)
+        return scripted + events
+
+    def _scripted(self, after: float, until: float) -> list[Event]:
+        """Fire the scripted events with ``after < at_s <= until``, in time order; their events
+        are published by ``submit``."""
+        due = sorted((e for e in self.scenario.events if after < e.at_s <= until), key=_at)
+        events: list[Event] = []
+        for event in due:
+            try:
+                events += self.submit(self._scripted_command(event))
+            except CommandRejected as exc:
+                label = self.scenario.clock_label(event.at_s)
+                text = f"Scripted {event.type} at {label} skipped: {exc}"
+                skipped: list[Event] = [Notification(to=self.scenario.command_callsign, text=text)]
+                self._publish(skipped)
+                events += skipped
         return events
+
+    def _scripted_command(self, event: ScriptedEvent) -> Command:
+        command = self.scenario.command_callsign
+        match event:
+            case ScriptedRestart():
+                jammer = self.scenario.friendly_jammer(event.jammer)
+                operator = jammer.operator_callsign if jammer else command
+                return RestartJammer(actor=operator, jammer=event.jammer)
+            case ScriptedThreat():
+                fields = event.model_dump(exclude={"type", "at_s"})
+                return AddThreat(actor=command, **fields)
+            case ScriptedRemoval():
+                return RemoveThreat(actor=command, threat=event.threat)
+            case ScriptedHold():
+                return InjectDelay(
+                    actor=SCENARIO_ACTOR, mission=event.mission, delay_s=event.delay_s
+                )
+            case _:
+                assert_never(event)
 
     def _concerned(self, jammer: str) -> list[MissionRuntime]:
         return [r for r in self.missions.values() if r.concerns(jammer)]
@@ -412,6 +460,7 @@ class Engine:
                 route=runtime.plan.optimised_route,  # as sent, with altitudes
                 revision=revision,
                 air_before_s=runtime.flight.airborne_s(now),
+                escape_until_s=plan.escape_until_s or 0.0,
             )
             label = self.scenario.clock_label
             text = (
@@ -463,6 +512,8 @@ class Engine:
                 return self._schedule_cut(command)
             case CancelCut():
                 return self._cancel_cut(command)
+            case RestartJammer():
+                return self._restart_jammer(command)
             case ConfirmCut():
                 return self._confirm_cut(command)
             case RequestMission():
@@ -550,6 +601,41 @@ class Engine:
                 for r in self._concerned(cut.jammer)
                 if self.state.missions[r.mission.id] != "arrived"
             ),
+        ]
+
+    def _restart_jammer(self, command: RestartJammer) -> list[Event]:
+        jammer = self.scenario.friendly_jammer(command.jammer)
+        if jammer is None:
+            raise CommandRejected(f"unknown friendly jammer {command.jammer}")
+        if command.actor not in (jammer.operator_callsign, self.scenario.command_callsign):
+            raise CommandRejected(f"only {jammer.operator_callsign} or the command can restart it")
+        now = self.clock.now()
+        covering = [
+            c
+            for c in self.state.cuts.values()
+            if c.jammer == jammer.id and c.start_s <= now < c.end_s
+        ]
+        if not covering:
+            raise CommandRejected(f"{jammer.id} is not cut now")
+        label = self.scenario.clock_label
+        planned_end = max(c.end_s for c in covering)
+        text = (
+            f"{jammer.id} back on at {label(now)}, before the end of its cut "
+            f"({label(planned_end)}). Reported by {command.actor}."
+        )
+        for cut in covering:
+            del self.state.cuts[cut.id]
+        # Every pilot still concerned, the operator and the command: a drone in the zone now
+        # has its control link jammed; the safety rule reroutes the flights at this tick.
+        pilots = {
+            r.mission.pilot_callsign
+            for r in self._concerned(jammer.id)
+            if self.state.missions[r.mission.id] != "arrived"
+        }
+        told = sorted(pilots | {jammer.operator_callsign, self.scenario.command_callsign})
+        return [
+            *(CutCancelled(cut=c) for c in covering),
+            *(Notification(to=who, text=text) for who in told),
         ]
 
     def _confirm_cut(self, command: ConfirmCut) -> list[Event]:
@@ -997,3 +1083,7 @@ class Engine:
         mission = runtime.mission
         text = f"{mission.drone_id} held {command.delay_s:.0f} s by {command.actor}."
         return [Notification(to=mission.pilot_callsign, text=text)]
+
+
+def _at(event: ScriptedEvent) -> float:
+    return event.at_s

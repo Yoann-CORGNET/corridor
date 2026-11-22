@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 
 import uvicorn
@@ -21,7 +22,13 @@ def main() -> None:
         "--clock-factor", type=float, default=20.0, help="simulated seconds per real second"
     )
     parser.add_argument("--cell-m", type=float, default=100.0, help="planning grid cell size")
+    parser.add_argument(
+        "--tak-host", help="OpenTAKServer host: publish routes, zones, drones and chat to ATAK"
+    )
+    parser.add_argument("--tak-port", type=int, default=8088, help="OTS plain-TCP CoT port")
     args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     scenario = load_scenario(args.scenario)
-    app = create_app(scenario, args.clock_factor, args.cell_m, ProcessReplanner)
+    tak = (args.tak_host, args.tak_port) if args.tak_host else None
+    app = create_app(scenario, args.clock_factor, args.cell_m, ProcessReplanner, tak)
     uvicorn.run(app, host=args.host, port=args.port)

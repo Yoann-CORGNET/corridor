@@ -54,6 +54,9 @@ class Flight:
     through_jammers: frozenset[str] = frozenset()
     """Friendly jammers the pilot chose to fly straight through while on (``on_timeout``
     cross after a refusal): the safety rule leaves them alone."""
+    escape_until_s: float = 0.0
+    """Route time before which the safety rules look away: the straight leg out of a zone the
+    drone was caught in (``MissionPlan.escape_until_s``)."""
 
     def route_time(self, now: float) -> float:
         """Where on its schedule the drone is at sim time ``now``."""
@@ -160,7 +163,7 @@ def schedule_violation(
     friendly = [
         z for z in zones if z.kind == "friendly_jammer" and z.threat not in flight.through_jammers
     ]
-    t, end = flight.route_time(now), flight.route[-1].t
+    t, end = max(flight.route_time(now), flight.escape_until_s), flight.route[-1].t
     while t <= end:
         position, action = position_at(flight.route, t)
         if action != "ground":
@@ -189,7 +192,7 @@ def route_threat(
     """Enemy jammer or radar whose zone the rest of the route would enter; in 3D (``cells``)
     also ``LINK`` where the pilot's signal is too weak at the drone's level."""
     enemies = [z for z in zones if z.kind in ("enemy_jammer", "radar")]
-    t, end = flight.route_time(now), flight.route[-1].t
+    t, end = max(flight.route_time(now), flight.escape_until_s), flight.route[-1].t
     while t <= end:
         position, action = position_at(flight.route, t)
         if action != "ground":

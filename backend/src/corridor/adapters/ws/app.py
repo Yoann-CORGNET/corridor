@@ -26,6 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import ValidationError
 
+from corridor.adapters.tak.bridge import TakBridge
 from corridor.adapters.ws.audience import Audience, Viewer
 from corridor.adapters.ws.hub import Hub, Outbox
 from corridor.adapters.ws.outlines import level_outlines
@@ -214,8 +215,11 @@ def create_app(
     clock_factor: float,
     cell_m: float,
     replanner: ReplannerFactory | None = None,
+    tak: tuple[str, int] | None = None,
 ) -> FastAPI:
-    """Without ``replanner``, nothing is planned. The first plan is requested at startup."""
+    """Without ``replanner``, nothing is planned. The first plan is requested at startup.
+    With ``tak`` (OTS host and plain-TCP port), the engine is also published to ATAK
+    (``corridor.adapters.tak.bridge``)."""
     planner = replanner(scenario) if replanner else None
     engine = Engine(scenario, cell_m, SimClock(clock_factor), planner)
     audience = Audience(engine)
@@ -238,10 +242,16 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         engine.request_plans()
         ticker = asyncio.create_task(_tick_forever(engine))
+        tasks = [ticker]
+        if tak is not None:
+            bridge = TakBridge(engine, *tak)
+            engine.subscribe(bridge.on_event)
+            tasks.append(asyncio.create_task(bridge.run()))
         yield
-        ticker.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await ticker
+        for task in tasks:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         if planner:
             planner.close()
 

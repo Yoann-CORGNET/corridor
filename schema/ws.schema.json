@@ -276,6 +276,7 @@
               "cut.confirm": "#/$defs/ConfirmCut",
               "cut.schedule": "#/$defs/ScheduleCut",
               "inject.delay": "#/$defs/InjectDelay",
+              "jammer.restart": "#/$defs/RestartJammer",
               "mission.launch": "#/$defs/LaunchMission",
               "mission.request": "#/$defs/RequestMission",
               "mission.update": "#/$defs/UpdateMission",
@@ -292,6 +293,9 @@
             },
             {
               "$ref": "#/$defs/CancelCut"
+            },
+            {
+              "$ref": "#/$defs/RestartJammer"
             },
             {
               "$ref": "#/$defs/ConfirmCut"
@@ -1659,6 +1663,33 @@
       "title": "RequestMission",
       "type": "object"
     },
+    "RestartJammer": {
+      "additionalProperties": false,
+      "description": "The friendly jammer is back on now, before the end of its cut: the cuts covering now\nend early (they are cancelled). Its operator or the command.",
+      "properties": {
+        "type": {
+          "const": "jammer.restart",
+          "default": "jammer.restart",
+          "title": "Type",
+          "type": "string"
+        },
+        "actor": {
+          "title": "Actor",
+          "type": "string"
+        },
+        "jammer": {
+          "title": "Jammer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "actor",
+        "jammer"
+      ],
+      "title": "RestartJammer",
+      "type": "object"
+    },
     "RouteChoice": {
       "additionalProperties": false,
       "description": "One route the pilot may pick. Only ``safe`` is flyable without the command's answer.",
@@ -2077,6 +2108,36 @@
           },
           "title": "Missions",
           "type": "array"
+        },
+        "events": {
+          "description": "Scripted timeline for a demo: each fires once, when the simulated clock passes at_s, as if the command, the jammer operator or the demo panel had sent it.",
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "inject.delay": "#/$defs/ScriptedHold",
+                "jammer.restart": "#/$defs/ScriptedRestart",
+                "threat.add": "#/$defs/ScriptedThreat",
+                "threat.remove": "#/$defs/ScriptedRemoval"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/ScriptedRestart"
+              },
+              {
+                "$ref": "#/$defs/ScriptedThreat"
+              },
+              {
+                "$ref": "#/$defs/ScriptedRemoval"
+              },
+              {
+                "$ref": "#/$defs/ScriptedHold"
+              }
+            ]
+          },
+          "title": "Events",
+          "type": "array"
         }
       },
       "required": [
@@ -2088,7 +2149,8 @@
         "enemy_threats",
         "terrain",
         "pilots",
-        "missions"
+        "missions",
+        "events"
       ],
       "title": "Scenario",
       "type": "object"
@@ -2141,6 +2203,190 @@
         "end_s"
       ],
       "title": "ScheduleCut",
+      "type": "object"
+    },
+    "ScriptedHold": {
+      "additionalProperties": false,
+      "description": "At ``at_s`` the flying drone of ``mission`` is held where it is (as ``inject.delay``).",
+      "properties": {
+        "type": {
+          "const": "inject.delay",
+          "default": "inject.delay",
+          "title": "Type",
+          "type": "string"
+        },
+        "at_s": {
+          "description": "Simulated time, seconds.",
+          "exclusiveMinimum": 0,
+          "title": "At S",
+          "type": "number"
+        },
+        "mission": {
+          "title": "Mission",
+          "type": "string"
+        },
+        "delay_s": {
+          "exclusiveMinimum": 0,
+          "maximum": 1800,
+          "title": "Delay S",
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "at_s",
+        "mission",
+        "delay_s"
+      ],
+      "title": "ScriptedHold",
+      "type": "object"
+    },
+    "ScriptedRemoval": {
+      "additionalProperties": false,
+      "description": "At ``at_s`` the command removes a threat (as ``threat.remove``).",
+      "properties": {
+        "type": {
+          "const": "threat.remove",
+          "default": "threat.remove",
+          "title": "Type",
+          "type": "string"
+        },
+        "at_s": {
+          "description": "Simulated time, seconds.",
+          "exclusiveMinimum": 0,
+          "title": "At S",
+          "type": "number"
+        },
+        "threat": {
+          "title": "Threat",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "at_s",
+        "threat"
+      ],
+      "title": "ScriptedRemoval",
+      "type": "object"
+    },
+    "ScriptedRestart": {
+      "additionalProperties": false,
+      "description": "At ``at_s`` the friendly jammer comes back on, before the end of its cut.",
+      "properties": {
+        "type": {
+          "const": "jammer.restart",
+          "default": "jammer.restart",
+          "title": "Type",
+          "type": "string"
+        },
+        "at_s": {
+          "description": "Simulated time, seconds.",
+          "exclusiveMinimum": 0,
+          "title": "At S",
+          "type": "number"
+        },
+        "jammer": {
+          "title": "Jammer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "at_s",
+        "jammer"
+      ],
+      "title": "ScriptedRestart",
+      "type": "object"
+    },
+    "ScriptedThreat": {
+      "additionalProperties": false,
+      "description": "At ``at_s`` the command reports an enemy threat or a zone to avoid (as ``threat.add``).\nThe engine gives it the next free id: R2 after R1, E2 after E1, A1 for the first zone.",
+      "properties": {
+        "type": {
+          "const": "threat.add",
+          "default": "threat.add",
+          "title": "Type",
+          "type": "string"
+        },
+        "at_s": {
+          "description": "Simulated time, seconds.",
+          "exclusiveMinimum": 0,
+          "title": "At S",
+          "type": "number"
+        },
+        "kind": {
+          "enum": [
+            "radar",
+            "jammer",
+            "avoid"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "pos": {
+          "$ref": "#/$defs/Position"
+        },
+        "radius_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Radius M"
+        },
+        "eirp_w": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Eirp W"
+        },
+        "bands": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bands"
+        },
+        "position_error_m": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Position Error M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "at_s",
+        "kind",
+        "pos",
+        "radius_m",
+        "eirp_w",
+        "bands",
+        "position_error_m"
+      ],
+      "title": "ScriptedThreat",
       "type": "object"
     },
     "ServerMessage": {

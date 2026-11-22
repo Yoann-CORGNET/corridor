@@ -13,6 +13,7 @@ from pydantic import Field, model_validator
 from corridor.domain.events import ChoiceKind, OnTimeout
 from corridor.domain.geo import Position
 from corridor.domain.model import Model
+from corridor.domain.scenario import ThreatKind, check_threat_fields
 
 
 class ScheduleCut(Model):
@@ -34,6 +35,15 @@ class CancelCut(Model):
     type: Literal["cut.cancel"] = "cut.cancel"
     actor: str
     cut: str
+
+
+class RestartJammer(Model):
+    """The friendly jammer is back on now, before the end of its cut: the cuts covering now
+    end early (they are cancelled). Its operator or the command."""
+
+    type: Literal["jammer.restart"] = "jammer.restart"
+    actor: str
+    jammer: str
 
 
 class ConfirmCut(Model):
@@ -131,7 +141,7 @@ class AddThreat(Model):
 
     type: Literal["threat.add"] = "threat.add"
     actor: str
-    kind: Literal["radar", "jammer", "avoid"]
+    kind: ThreatKind
     pos: Position
     radius_m: float | None = Field(
         default=None, gt=0, description="Radar range or radius of the zone to avoid, metres."
@@ -144,14 +154,9 @@ class AddThreat(Model):
 
     @model_validator(mode="after")
     def _fields_match_kind(self) -> Self:
-        power = self.eirp_w is not None, self.bands is not None
-        if self.kind == "jammer":
-            if not all(power) or self.radius_m is not None:
-                raise ValueError("a jammer takes eirp_w and bands, not radius_m")
-        elif any(power) or self.radius_m is None:
-            raise ValueError("a radar or a zone to avoid takes radius_m, not eirp_w or bands")
-        if self.kind == "avoid" and self.position_error_m:
-            raise ValueError("a zone to avoid has no position error: widen its radius")
+        check_threat_fields(
+            self.kind, self.radius_m, self.eirp_w, self.bands, self.position_error_m
+        )
         return self
 
 
@@ -166,6 +171,7 @@ class RemoveThreat(Model):
 Command = Annotated[
     ScheduleCut
     | CancelCut
+    | RestartJammer
     | ConfirmCut
     | RequestMission
     | UpdateMission

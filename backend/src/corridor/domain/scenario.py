@@ -235,6 +235,80 @@ class ReferenceLink(Model):
 
 Role = Literal["command", "pilot", "operator"]
 
+ThreatKind = Literal["radar", "jammer", "avoid"]
+
+
+def check_threat_fields(
+    kind: ThreatKind,
+    radius_m: float | None,
+    eirp_w: float | None,
+    bands: list[str] | None,
+    position_error_m: float,
+) -> None:
+    """A radar and a zone to avoid take ``radius_m``, an enemy jammer ``eirp_w`` and ``bands``.
+
+    Raises ValueError otherwise."""
+    power = eirp_w is not None, bands is not None
+    if kind == "jammer":
+        if not all(power) or radius_m is not None:
+            raise ValueError("a jammer takes eirp_w and bands, not radius_m")
+    elif any(power) or radius_m is None:
+        raise ValueError("a radar or a zone to avoid takes radius_m, not eirp_w or bands")
+    if kind == "avoid" and position_error_m:
+        raise ValueError("a zone to avoid has no position error: widen its radius")
+
+
+class ScriptedRestart(Model):
+    """At ``at_s`` the friendly jammer comes back on, before the end of its cut."""
+
+    type: Literal["jammer.restart"] = "jammer.restart"
+    at_s: float = Field(gt=0, description="Simulated time, seconds.")
+    jammer: str
+
+
+class ScriptedThreat(Model):
+    """At ``at_s`` the command reports an enemy threat or a zone to avoid (as ``threat.add``).
+    The engine gives it the next free id: R2 after R1, E2 after E1, A1 for the first zone."""
+
+    type: Literal["threat.add"] = "threat.add"
+    at_s: float = Field(gt=0, description="Simulated time, seconds.")
+    kind: ThreatKind
+    pos: Position
+    radius_m: float | None = Field(default=None, gt=0)
+    eirp_w: float | None = Field(default=None, gt=0)
+    bands: list[str] | None = Field(default=None, min_length=1)
+    position_error_m: float = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _fields_match_kind(self) -> Self:
+        check_threat_fields(
+            self.kind, self.radius_m, self.eirp_w, self.bands, self.position_error_m
+        )
+        return self
+
+
+class ScriptedRemoval(Model):
+    """At ``at_s`` the command removes a threat (as ``threat.remove``)."""
+
+    type: Literal["threat.remove"] = "threat.remove"
+    at_s: float = Field(gt=0, description="Simulated time, seconds.")
+    threat: str
+
+
+class ScriptedHold(Model):
+    """At ``at_s`` the flying drone of ``mission`` is held where it is (as ``inject.delay``)."""
+
+    type: Literal["inject.delay"] = "inject.delay"
+    at_s: float = Field(gt=0, description="Simulated time, seconds.")
+    mission: str
+    delay_s: float = Field(gt=0, le=1800)
+
+
+ScriptedEvent = Annotated[
+    ScriptedRestart | ScriptedThreat | ScriptedRemoval | ScriptedHold,
+    Field(discriminator="type"),
+]
+
 
 class Scenario(Model):
     start_time: AwareDatetime = Field(description="Wall-clock time of simulated t = 0.")
@@ -250,6 +324,13 @@ class Scenario(Model):
     missions: list[Mission] = Field(
         default_factory=list,
         description="Missions known at start. In the file, drone fields may be left out.",
+    )
+    events: list[ScriptedEvent] = Field(
+        default_factory=list,
+        description=(
+            "Scripted timeline for a demo: each fires once, when the simulated clock passes"
+            " at_s, as if the command, the jammer operator or the demo panel had sent it."
+        ),
     )
 
     @model_validator(mode="before")
@@ -299,6 +380,17 @@ class Scenario(Model):
             drone = _drone_fields(pilot.drone)
             if any(getattr(mission, k) != v for k, v in drone.items()):
                 raise ValueError(f"{mission.id}: drone fields differ from {pilot.callsign}'s drone")
+        return self
+
+    @model_validator(mode="after")
+    def _scripted_events_name_known_things(self) -> Self:
+        jammers = {j.id for j in self.friendly_jammers}
+        missions = {m.id for m in self.missions}
+        for event in self.events:
+            if isinstance(event, ScriptedRestart) and event.jammer not in jammers:
+                raise ValueError(f"event at {event.at_s} s: unknown friendly jammer {event.jammer}")
+            if isinstance(event, ScriptedHold) and event.mission not in missions:
+                raise ValueError(f"event at {event.at_s} s: unknown mission {event.mission}")
         return self
 
     def friendly_jammer(self, jammer_id: str) -> FriendlyJammer | None:
