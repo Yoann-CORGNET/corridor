@@ -72,7 +72,7 @@ def metres(value: str | None) -> float | None:
     """'25', '25 m', '25.5m' -> metres; feet and other units are skipped."""
     if not value:
         return None
-    match = re.fullmatch(r"\s*([0-9]+(?:\.[0-9]+)?)\s*(m)?\s*", value)
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)\s*m?", value.strip())
     return float(match.group(1)) if match else None
 
 

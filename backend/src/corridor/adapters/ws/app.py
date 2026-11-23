@@ -239,12 +239,14 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         engine.request_plans()
         ticker = asyncio.create_task(_tick_forever(engine))
-        yield
-        ticker.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await ticker
-        if planner:
-            planner.close()
+        try:
+            yield
+        finally:
+            ticker.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await ticker
+            if planner:
+                planner.close()
 
     app = FastAPI(title="Corridor", lifespan=lifespan)
 

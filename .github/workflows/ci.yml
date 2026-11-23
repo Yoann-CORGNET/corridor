@@ -5,9 +5,10 @@
 # - actions pinned to a full commit SHA (a tag can be moved), the tag in the comment;
 #   Dependabot (.github/dependabot.yml) bumps them;
 # - no npm lifecycle scripts at install (`npm ci --ignore-scripts`);
-# - uv installs from the lockfile only (`--locked`). SonarCloud also asks for `--no-build`
-#   and locked `uv run`: accepted there, since every dependency in uv.lock ships wheels (the
-#   only build is the corridor package itself) and `uv run` follows a `uv sync --locked`.
+# - uv installs from the lockfile only (`--locked`) and never builds a dependency from source
+#   (`--no-build`): every dependency in uv.lock ships wheels. The only build allowed is the
+#   corridor package itself (UV_NO_BINARY_PACKAGE below). `uv run` repeats the flags because it
+#   syncs too.
 name: CI
 
 on:
@@ -22,6 +23,9 @@ concurrency:
 
 permissions:
   contents: read
+
+env:
+  UV_NO_BINARY_PACKAGE: corridor
 
 # Three jobs in parallel: the backend tests are the long part, so linting and type-checking
 # run beside them. The frontend checks take seconds and stay in one job.
@@ -41,13 +45,13 @@ jobs:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
       - name: Install
-        run: uv sync --locked
+        run: uv sync --locked --no-build
       - name: Lint
-        run: uv run ruff check src tests
+        run: uv run --locked --no-build ruff check src tests
       - name: Format
-        run: uv run ruff format --check src tests
+        run: uv run --locked --no-build ruff format --check src tests
       - name: Type-check
-        run: uv run mypy
+        run: uv run --locked --no-build mypy
 
   backend-test:
     name: Backend (pytest)
@@ -64,12 +68,12 @@ jobs:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
       - name: Install
-        run: uv sync --locked
+        run: uv sync --locked --no-build
       # Includes test_schema: the committed schema/ws.schema.json must match the models.
       # One worker per core; worksteal lets idle workers take queued tests, so the two long
       # flight tests (about 20 s each) do not wait behind each other.
       - name: Test
-        run: uv run pytest -n auto --dist worksteal
+        run: uv run --locked --no-build pytest -n auto --dist worksteal
 
   frontend:
     name: Frontend (oxlint, tsc, vitest)

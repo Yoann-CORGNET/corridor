@@ -9,6 +9,14 @@ export type ConnStatus = 'idle' | 'connecting' | 'open' | 'closed'
 /** Close code the server sends for a callsign the scenario does not know. */
 export const UNKNOWN_CALLSIGN = 4003
 
+/** Scenario callsigns look like CMD, PILOT-1, EW-J3. The callsign comes from the URL or browser
+ *  storage, so anything else is refused before it is stored or sent. */
+const CALLSIGN_PATTERN = /^[A-Za-z0-9_-]{1,32}$/
+
+export function isValidCallsign(value: string): boolean {
+  return CALLSIGN_PATTERN.test(value)
+}
+
 interface Handlers {
   onMessage: (msg: ServerMessage) => void
   onStatus: (status: ConnStatus) => void
@@ -33,6 +41,7 @@ export class CorridorSocket {
 
   /** Connect as `callsign`, dropping any current connection. */
   start(callsign: string): void {
+    if (!isValidCallsign(callsign)) throw new Error(`invalid callsign ${callsign}`)
     this.stop()
     this.url = `${this.baseUrl}?callsign=${encodeURIComponent(callsign)}`
     this.stopped = false

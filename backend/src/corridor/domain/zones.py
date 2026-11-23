@@ -154,7 +154,7 @@ def js_disc(
     if distance < 1.0:
         raise ValueError("jammer at the pilot position")
     k2 = 10 ** (threshold_db / 10) * link_eirp_w / jammer_eirp_w
-    if k2 == 1.0 or math.sqrt(k2) * distance / abs(k2 - 1) > MAX_ZONE_RADIUS_M:
+    if math.isclose(k2, 1.0) or math.sqrt(k2) * distance / abs(k2 - 1) > MAX_ZONE_RADIUS_M:
         raise ValueError("J/S boundary is nearly a straight line: adjust the powers")
     k = math.sqrt(k2)
     radius = k * distance / abs(k2 - 1)
