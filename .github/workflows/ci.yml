@@ -1,5 +1,6 @@
 # Checks every pull request and every push to main: the same commands as in CLAUDE.md
-# ("Repo conventions") and frontend/README.md.
+# ("Repo conventions") and frontend/README.md. A push to main that passes every check and
+# touches backend/ then deploys the backend to Cloud Run (job deploy-backend, docs/deploy.md).
 #
 # Supply chain:
 # - actions pinned to a full commit SHA (a tag can be moved), the tag in the comment;
@@ -16,10 +17,11 @@ on:
   push:
     branches: [main]
 
-# A new push to the same branch cancels the run still going.
+# A new push to a pull request cancels the run still going. On main runs are queued instead:
+# cancelling one could stop a deploy halfway.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -105,3 +107,71 @@ jobs:
         run: npm test
       - name: Build (type-check included)
         run: npm run build
+
+  # Builds the image once, pushes it to Docker Hub (public) tagged with the commit SHA and
+  # deploys that exact image: Cloud Run does not watch the registry, the deploy is explicit. Every
+  # deploy restarts the world (the state lives in memory), so a push that touches neither
+  # backend/ nor this file deploys nothing. The service flags are repeated on each deploy: this file is the
+  # source of truth for the Cloud Run configuration (see docs/deploy.md for why each one).
+  deploy-backend:
+    name: Deploy backend (Cloud Run)
+    needs: [backend-lint, backend-test, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write  # OIDC token exchanged for GCP credentials (Workload Identity Federation)
+    concurrency:
+      group: deploy-backend
+      cancel-in-progress: false
+    env:
+      REGION: europe-west9
+      SERVICE: corridor-backend
+      IMAGE: docker.io/${{ vars.DOCKERHUB_USERNAME }}/corridor-backend:${{ github.sha }}
+      RUNTIME_SA: ${{ vars.GCP_RUNTIME_SA }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0  # the diff below needs the previous head of main
+      - name: Backend changed?
+        id: changes
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if git diff --quiet "$BEFORE" "$GITHUB_SHA" -- backend/ .github/workflows/ci.yml; then
+            echo "No change under backend/ nor in ci.yml: nothing to deploy."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build and push the image
+        if: steps.changes.outputs.deploy == 'true'
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          echo "$DOCKERHUB_TOKEN" | docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
+          docker build -t "$IMAGE" backend
+          docker push "$IMAGE"
+      - if: steps.changes.outputs.deploy == 'true'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - if: steps.changes.outputs.deploy == 'true'
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: Deploy
+        if: steps.changes.outputs.deploy == 'true'
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --image "$IMAGE" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SA" \
+            --min-instances 1 --max-instances 1 \
+            --no-cpu-throttling \
+            --timeout 3600 \
+            --session-affinity \
+            --cpu 2 --memory 2Gi \
+            --set-env-vars CORRIDOR_SCENARIO=hongkong_relay.json \
+            --quiet
