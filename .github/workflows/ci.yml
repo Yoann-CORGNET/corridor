@@ -157,6 +157,7 @@ jobs:
       - if: steps.changes.outputs.deploy == 'true'
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOY_SA }}
       - if: steps.changes.outputs.deploy == 'true'
@@ -168,7 +169,7 @@ jobs:
             --image "$IMAGE" \
             --region "$REGION" \
             --service-account "$RUNTIME_SA" \
-            --min-instances 1 --max-instances 1 \
+            --min-instances 0 --max-instances 1 \
             --no-cpu-throttling \
             --timeout 3600 \
             --session-affinity \

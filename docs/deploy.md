@@ -22,17 +22,23 @@ docker run --rm -p 8080:8080 -e CORRIDOR_SCENARIO=annecy.json corridor-backend
 ## Cloud Run settings
 
 The backend is stateful: it keeps the world state in memory, runs the simulation clock in a
-background task and serves one WebSocket per client. Cloud Run's defaults break all three, so
-the service needs these settings:
+background task and serves one WebSocket per client. Cloud Run's defaults break the last two,
+so the service needs these settings:
 
 | Flag                   | Why                                                             |
 | ---------------------- | --------------------------------------------------------------- |
-| `--min-instances 1`    | The state lives in memory; scaling to zero resets the scenario. |
+| `--min-instances 0`    | Scale to zero: no cost while nobody uses it (see below).        |
 | `--max-instances 1`    | A second instance would hold a different world.                 |
 | `--no-cpu-throttling`  | The clock ticks between requests; throttled CPU freezes it.     |
 | `--timeout 3600`       | Maximum WebSocket lifetime (60 min); the front end reconnects.  |
 | `--session-affinity`   | Keeps a client on the same instance across reconnects.          |
 | `--cpu 2 --memory 2Gi` | The planner runs in its own worker process next to the server.  |
+
+Scaling to zero is a trade-off. An open WebSocket counts as a request in progress and keeps
+the instance up; once the last client has left, Cloud Run stops it (an idle instance is kept
+up to 15 minutes) and the world state is lost. The next visitor waits for a cold start (a few seconds: the image loads
+numpy, scipy and rasterio) and finds the scenario back at its start. Fine for a showcase; set
+`--min-instances 1` if a session must survive while nobody is connected.
 
 These flags live in the `deploy-backend` job of `.github/workflows/ci.yml` and are applied on
 every deploy: change them there, not in the console (the next deploy would overwrite the
@@ -133,7 +139,7 @@ gcloud run deploy corridor-backend \
   --source backend \
   --region europe-west9 \
   --service-account corridor-run@<gcp-project-id>.iam.gserviceaccount.com \
-  --min-instances 1 --max-instances 1 \
+  --min-instances 0 --max-instances 1 \
   --no-cpu-throttling \
   --timeout 3600 \
   --session-affinity \
